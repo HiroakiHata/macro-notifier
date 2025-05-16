@@ -1,57 +1,78 @@
+import os
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 import pytz
-import os
 
-def fetch_events():
-    url = "https://jp.investing.com/economic-calendar/"
-    headers = {
-        "User-Agent": "Mozilla/5.0"
-    }
-    response = requests.get(url, headers=headers)
-    soup = BeautifulSoup(response.content, "html.parser")
+# 対象国（7カ国）
+TARGET_COUNTRIES = [
+    "アメリカ", "日本", "中国", "ユーロ圏", "イギリス", "オーストラリア", "ニュージーランド"
+]
 
-    today_jst = datetime.now(pytz.timezone("Asia/Tokyo")).strftime("%m/%d")
-    target_countries = ["アメリカ", "ユーロ圏", "イギリス", "日本", "中国", "オーストラリア", "ニュージーランド"]
+# Slack Webhook（GitHub Secrets 経由）
+SLACK_WEBHOOK = os.getenv("SLACK_WEBHOOK")
 
-    results = []
-    rows = soup.select("tr.js-event-item")
+# スクレイピング対象のURL（Investing.comの経済指標カレンダー）
+URL = "https://jp.investing.com/economic-calendar/"
 
-    for row in rows:
-        date_attr = row.get("data-event-datetime", "")
-        if today_jst not in date_attr:
+# タイムゾーン（JST）
+JST = pytz.timezone("Asia/Tokyo")
+TODAY = datetime.now(JST).strftime("%m/%d/%Y")
+
+# リクエストヘッダー（Bot対策用）
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+}
+
+def scrape_events():
+    response = requests.get(URL, headers=HEADERS)
+    soup = BeautifulSoup(response.text, "html.parser")
+    rows = []
+
+    for row in soup.select("tr.js-event-item"):
+        # 日付と国情報を取得
+        date_raw = row.get("data-event-datetime")
+        country = row.select_one("td.left.flagCur span.flagCur")  # 国名
+        importance = row.select_one(".sentiment")  # ★の数
+        title = row.select_one(".event")  # 指標名
+
+        if not (date_raw and country and importance and title):
             continue
 
-        country_tag = row.select_one("td.left.flagCur span")
-        country = country_tag["title"] if country_tag and country_tag.has_attr("title") else ""
-        if country not in target_countries:
+        # 日本時間に変換
+        dt = datetime.utcfromtimestamp(int(date_raw)).astimezone(JST)
+        time_str = dt.strftime("%H:%M")
+        country_name = country.text.strip()
+        star_count = len(importance.select("i.grayFullBullishIcon"))
+        title_text = title.text.strip()
+
+        # フィルタ：今日・対象国・★2以上
+        if dt.strftime("%m/%d/%Y") != TODAY:
+            continue
+        if country_name not in TARGET_COUNTRIES:
+            continue
+        if star_count < 2:
             continue
 
-        importance = len(row.select("td.sentiment i.grayFullBullishIcon"))
-        if importance < 2:
-            continue
+        rows.append(f"【{country_name}】{time_str}　（{title_text}）（★{star_count}）")
 
-        time = row.select_one("td.js-time")
-        event = row.select_one("td.event a, td.event span")
-        results.append(f"【{country}】{time.text.strip()}　{event.text.strip()}（★{importance}）")
+    return rows
 
-    return results
-
-def notify_slack(events):
-    webhook_url = os.environ.get("SLACK_WEBHOOK")
-    if not webhook_url:
-        print("No Slack webhook set.")
-        return
+def send_to_slack(rows):
+    if not SLACK_WEBHOOK:
+        raise ValueError("SLACK_WEBHOOK が環境変数に設定されていません。")
 
     message = "📊 *本日の重要経済指標（7カ国・★2以上）*\n\n"
+    if rows:
+        message += "\n".join(rows)
+    else:
+        message += "本日は対象国の重要指標がありません。"
 
-"
-    message += "\n".join(events) if events else "本日は対象国の重要指標がありません。"
+    payload = { "text": message }
 
-    res = requests.post(webhook_url, json={"text": message})
-    print("Slack status:", res.status_code)
+    res = requests.post(SLACK_WEBHOOK, json=payload)
+    res.raise_for_status()
 
 if __name__ == "__main__":
-    events = fetch_events()
-    notify_slack(events)
+    events = scrape_events()
+    send_to_slack(events)
