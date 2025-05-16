@@ -58,46 +58,64 @@ check_dates = { now.date(), (now + timedelta(days=1)).date() }
 # ---- 抽出処理 ----
 rows = []
 for ev in events:
-    # 日付
-    ev_date = ev.get("date")
-    if not ev_date:
+    # --- ISO datetime 解析 ---
+    raw_dt = ev.get("date")
+    if raw_dt:
+        try:
+            dt_obj = datetime.fromisoformat(raw_dt)
+            # UTC or offset -> JST
+            dt_obj = dt_obj.astimezone(jst)
+        except Exception:
+            dt_obj = None
+    else:
+        dt_obj = None
+    # 年月日分割対応
+    if not dt_obj:
         y, m, d = ev.get("year") or ev.get("y"), ev.get("month") or ev.get("m"), ev.get("day") or ev.get("d")
         if y and m and d:
-            ev_date = f"{int(y):04d}-{int(m):02d}-{int(d):02d}"
-    if not ev_date:
-        continue
-    try:
-        d_obj = datetime.fromisoformat(ev_date).date()
-    except Exception:
+            try:
+                dt_obj = datetime(int(y), int(m), int(d), tzinfo=jst)
+            except Exception:
+                dt_obj = None
+    if not dt_obj:
         continue
 
-    # 深夜指標を当日扱い
-    time_str = ev.get("time", "00:00")
-    try:
-        hour = int(time_str.split(":")[0])
-    except Exception:
-        hour = 0
-    if d_obj == (now.date() - timedelta(days=1)) and hour < 6:
-        d_obj = now.date()
-
+    # 日付チェック
+    d_obj = dt_obj.date()
     if d_obj not in check_dates:
-        continue
+        # 前日深夜0-5時は当日扱い
+        if d_obj == (now.date() - timedelta(days=1)) and dt_obj.hour < 6:
+            d_obj = now.date()
+        else:
+            continue
 
-    # 通貨コード
+    #----- 通貨判定 -----
     ccy = (ev.get("currency") or ev.get("country") or "").upper()
     if ccy not in TARGET_CCY:
         continue
 
-    # 重要度
+    #----- 重要度判定 -----
     impact_val = IMPACT_MAP.get(str(ev.get("impact", "Low")).title(), 0)
     if impact_val < TARGET_LEVEL:
         continue
 
+    #----- 時刻とタイトル -----
+    time_str = dt_obj.strftime("%H:%M")
     title = ev.get("title") or ev.get("event") or "不明"
     star  = "★" * impact_val
     rows.append(f"【{ccy}】{time_str} （{title}）（{star}）")
 
 # ---- Slack 通知 ----
+header = ":chart_with_upwards_trend: *本日の重要経済指標（7通貨・★2以上）*
+
+"
+if rows:
+    body = "
+".join(rows)
+else:
+    body = f"本日は対象通貨の重要指標がありません。（raw 件数: {len(events)}）"
+
+requests.post(SLACK_WEBHOOK, json={"text": header + body})
 header = ":chart_with_upwards_trend: *本日の重要経済指標（7通貨・★2以上）*\n\n"
 if rows:
     body = "\n".join(rows)
@@ -105,3 +123,4 @@ else:
     body = f"本日は対象通貨の重要指標がありません。（raw 件数: {len(events)}）"
 
 requests.post(SLACK_WEBHOOK, json={"text": header + body})
+
