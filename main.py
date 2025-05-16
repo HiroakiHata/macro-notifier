@@ -43,6 +43,10 @@ except Exception as e:
     requests.post(SLACK_WEBHOOK, json={"text": f"⚠️ JSON パースエラー: {e}"})
     raise
 
+# ---------- デバッグ: 最初の3件をSlackに送信 ----------
+sample = json.dumps(events[:3], ensure_ascii=False, indent=2)
+requests.post(SLACK_WEBHOOK, json={"text": f"```{sample}```"})
+
 # ---------- 抽出条件 ----------
 TARGET_CCY   = {"USD", "EUR", "GBP", "JPY", "CNY", "AUD", "NZD"}
 TARGET_LEVEL = 2  # ★2 以上
@@ -96,3 +100,4 @@ else:
     body = f"本日は対象通貨の重要指標がありません。（raw 件数: {len(events)}）"
 
 requests.post(SLACK_WEBHOOK, json={"text": header + body})
+
