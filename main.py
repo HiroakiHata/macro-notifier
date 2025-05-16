@@ -45,10 +45,7 @@ except Exception as e:
     requests.post(SLACK_WEBHOOK, json={"text": f"⚠️ JSON パースエラー: {e}"})
     raise
 
-TARGET_CCY = {"USD", "EUR", "GBP", "JPY", "CNY", "AUD", "NZD"}
-
-jst = timezone(timedelta(hours=9))
- today = datetime.now(jst).date()
+TARGET_CCY = {"USD", "EUR", "GBP", "JPY", "CNY", "AUD", "NZD"}jst = timezone(timedelta(hours=9))today = datetime.now(jst).date()
 check_dates = {today, today + timedelta(days=1)}
 
 rows = []
