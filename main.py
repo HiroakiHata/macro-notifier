@@ -1,22 +1,11 @@
-import os
-import json
-import requests
+# 経済指標の整形（例）
+header = ":chart_with_upwards_trend: 本日の重要経済指標（7通貨・★1以上）"
+content = "【USD】21:30（PPI m/m）（★★★）\n【JPY】08:50（GDP q/q）（★★）\n..."
 
-# 通知用Webhookの取得
-webhook = os.environ.get("SLACK_WEBHOOK")
+# 要約レポート（日本語）
+summary = ":bookmark_tabs: 要約レポート\n本日は米国のPPIが市場の注目材料です。08:50の日本GDPにも注意。"
 
-# Slack通知用メッセージ
+# Slack送信用
 payload = {
-    "text": ":bug: Slack通知テスト（デバッグ用）"
+    "text": f"{header}\n{content}\n\n{summary}"
 }
-
-# --- デバッグ出力 ---
-print(">>> SLACK_WEBHOOK:", webhook)
-
-# SlackへPOSTリクエスト
-try:
-    response = requests.post(webhook, json=payload)
-    print(">>> Slack HTTP status:", response.status_code)
-    print(">>> Slack response body:", response.text)
-except Exception as e:
-    print(">>> Slack POST Error:", e)
