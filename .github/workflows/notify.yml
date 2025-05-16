@@ -1,19 +1,28 @@
-name: Daily Macro Notifier
+import os
+import json
+import requests
 
-on:
-  schedule:
-    # 平日 08:00 JST に自動実行 (UTC 23:00)
-    - cron: '0 23 * * 1-5'
-  workflow_dispatch:
+# 通知用Webhookの取得
+webhook = os.environ.get("SLACK_WEBHOOK")
 
-jobs:
-  notify:
-    runs-on: ubuntu-latest
-    env:
-      SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
-      TRADING_ECONOMICS_API_KEY: ${{ secrets.TRADING_ECONOMICS_API_KEY }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
-      # 以下、必要なステップを記述…
+# 送信するSlackメッセージ（テスト）
+payload = {
+    "text": ":bug: Slack通知テスト - デバッグ用"
+}
 
+# --- デバッグ出力 ---
+print(">>> SLACK_WEBHOOK:", webhook)
+
+# SlackへPOSTリクエスト
+try:
+    if not webhook:
+        raise RuntimeError("SLACK_WEBHOOKが取得できていません。環境変数を確認してください。")
+
+    response = requests.post(webhook, json=payload)
+    print(">>> Slack HTTP status:", response.status_code)
+    print(">>> Slack response body:", response.text)
+
+    if response.status_code != 200:
+        raise RuntimeError(f"Slack通知失敗: {response.status_code} - {response.text}")
+except Exception as e:
+    print(">>> Slack POST Error:", e)
