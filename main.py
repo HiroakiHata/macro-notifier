@@ -49,16 +49,19 @@ requests.post(SLACK_WEBHOOK, json={"text": f"```{sample}```"})
 
 # ---------- 抽出条件 ----------
 TARGET_CCY   = {"USD", "EUR", "GBP", "JPY", "CNY", "AUD", "NZD"}
-TARGET_LEVEL = 2  # ★2 以上
+TARGET_LEVEL = 2  # ★2 (Medium) 以上
 
-jst    = timezone(timedelta(hours=9))
-today  = datetime.now(jst).date()
-tomorrow = today + timedelta(days=1)
-check_dates = {today, tomorrow}
+IMPACT_MAP = {"Low": 1, "Medium": 2, "High": 3}
+
+jst = timezone(timedelta(hours=9))
+now = datetime.now(jst)
+
+# 今日 + 明日 を確認
+check_dates = {now.date(), (now + timedelta(days=1)).date()}
 
 rows = []
 for ev in events:
-    # --- 日付組み立て ---
+    # --- 日付取得 ---
     ev_date = ev.get("date") or (
         lambda y, m, d: f"{y:04d}-{m:02d}-{d:02d}" if (y and m and d) else None
     )(ev.get("year") or ev.get("y"), ev.get("month") or ev.get("m"), ev.get("day") or ev.get("d"))
@@ -69,35 +72,38 @@ for ev in events:
     except ValueError:
         continue
 
-    # 00‑05 時台は前日扱い→当日に補正
     time_str = ev.get("time", "00:00")
     try:
         hour = int(time_str.split(":")[0])
     except ValueError:
         hour = 0
-    if d_obj == today - timedelta(days=1) and hour < 6:
-        d_obj = today
+    # 前日深夜 0‑5 時 → 当日に補正
+    if d_obj == now.date() - timedelta(days=1) and hour < 6:
+        d_obj = now.date()
 
     if d_obj not in check_dates:
         continue
 
-    if (ccy := ev.get("currency")) not in TARGET_CCY:
+    # --- 通貨判定 (country フィールドを使用) ---
+    ccy = (ev.get("currency") or ev.get("country") or "").upper()
+    if ccy not in TARGET_CCY:
         continue
 
-    impact_val = int(str(ev.get("impact", "0")))
+    # --- 重要度判定 ---
+    impact_raw = ev.get("impact", "Low")
+    impact_val = IMPACT_MAP.get(str(impact_raw).title(), 0)
     if impact_val < TARGET_LEVEL:
         continue
 
+    # --- 行作成 ---
     title = ev.get("title") or ev.get("event") or "不明"
     star  = "★" * impact_val
     rows.append(f"【{ccy}】{time_str} （{title}）（{star}）")
 
 # ---------- Slack 送信 ----------
-header = ":chart_with_upwards_trend: *本日の重要経済指標（7通貨・★2以上）*\n\n"
-if rows:
-    body = "\n".join(rows)
-else:
-    body = f"本日は対象通貨の重要指標がありません。（raw 件数: {len(events)}）"
+header = ":chart_with_upwards_trend: *本日の重要経済指標（7通貨・★2以上）*
 
+"
+body = "
+".join(rows) if rows else f"本日は対象通貨の重要指標がありません。（raw 件数: {len(events)}）"
 requests.post(SLACK_WEBHOOK, json={"text": header + body})
-
