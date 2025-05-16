@@ -110,3 +110,4 @@ else:
     body = f"本日は対象通貨の重要指標がありません。（raw 件数: {len(events)}）"
 
 requests.post(SLACK_WEBHOOK, json={"text": header + body})
+
