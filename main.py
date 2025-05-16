@@ -116,11 +116,3 @@ else:
     body = f"本日は対象通貨の重要指標がありません。（raw 件数: {len(events)}）"
 
 requests.post(SLACK_WEBHOOK, json={"text": header + body})
-header = ":chart_with_upwards_trend: *本日の重要経済指標（7通貨・★2以上）*\n\n"
-if rows:
-    body = "\n".join(rows)
-else:
-    body = f"本日は対象通貨の重要指標がありません。（raw 件数: {len(events)}）"
-
-requests.post(SLACK_WEBHOOK, json={"text": header + body})
-
