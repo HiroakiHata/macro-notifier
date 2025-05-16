@@ -1,27 +1,52 @@
-import requests
 import os
+import requests
 from datetime import datetime
 
-# 環境変数から取得
-webhook_url = os.environ.get("SLACK_WEBHOOK")
-api_key = os.environ.get("TE_API_KEY")
+# ===== 設定 =====
+slack_webhook = os.getenv("SLACK_WEBHOOK")
+api_key = os.getenv("TRADING_ECONOMICS_API_KEY")
 
-# 今日の日付を取得（UTC基準）
-today = datetime.utcnow().strftime('%Y-%m-%d')
+# 今日の日付（UTCで調整）を取得
+today = datetime.utcnow().strftime("%Y-%m-%d")
 
-# APIから経済指標を取得
-url = f"https://api.tradingeconomics.com/calendar/country/United States,Japan,China,Euro Area,United Kingdom,Australia,New Zealand?d1={today}&d2={today}&c={api_key}&f=json"
+# Trading Economics 経済指標取得URL
+url = f"https://api.tradingeconomics.com/calendar?c={api_key}&d1={today}&f=json"
+
+# ===== データ取得とログ出力 =====
 res = requests.get(url)
-data = res.json()
+print("レスポンスステータス:", res.status_code)
+print("レスポンス内容:", res.text)
 
-# 重要度★2以上だけを抽出
-important = [f"【{d['Country']}】{d['Date']} {d['Event']}（★{d['Importance']}）"
-             for d in data if int(d.get("Importance", 0)) >= 2]
+try:
+    data = res.json()
+except Exception as e:
+    print("JSON読み込みエラー:", e)
+    exit(1)
 
-# Slackに送信
-if important:
-    text = ":bar_chart: 本日の重要経済指標（★2以上）\n" + "\n".join(important)
-else:
-    text = ":bar_chart: 本日の重要経済指標（★2以上）はありません"
+# ===== 指標のフィルタリング条件 =====
+TARGET_COUNTRIES = ['United States', 'Euro Area', 'United Kingdom', 'Japan', 'China', 'Australia', 'New Zealand']
+MIN_IMPORTANCE = 2
 
-requests.post(webhook_url, json={"text": text})
+# ===== フィルタ処理 =====
+filtered = []
+for event in data:
+    country = event.get("Country", "")
+    importance = event.get("Importance", 0)
+    time = event.get("Date", "")
+    event_name = event.get("Event", "不明")
+
+    if country in TARGET_COUNTRIES and importance >= MIN_IMPORTANCE:
+        formatted = f"【{country}】{time}　（{event_name}）（★{importance}）"
+        filtered.append(formatted)
+
+# ===== Slackメッセージ生成 =====
+message = ":chart_with_upwards_trend: *本日の重要経済指標（7カ国・★2以上）*\n\n"
+message += "\n".join(filtered) if filtered else "本日は対象国の重要指標がありません。"
+
+# ===== Slackへ通知 =====
+res_slack = requests.post(
+    slack_webhook,
+    json={"text": message},
+    headers={"Content-Type": "application/json"}
+)
+print("Slack通知ステータス:", res_slack.status_code)
