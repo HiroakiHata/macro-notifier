@@ -5,7 +5,6 @@ from datetime import datetime, timedelta, timezone
 
 # --- 環境変数からWebhookとHFトークン取得 ---
 SLACK_WEBHOOK = os.environ.get("SLACK_WEBHOOK")
-HF_TOKEN = os.environ.get("HF_TOKEN")
 
 # --- JSTの日付取得（当日6:01〜翌6:00までを対象） ---
 jst = timezone(timedelta(hours=9))
@@ -38,21 +37,22 @@ impact_stars = {"Low": 1, "Medium": 2, "High": 3}
 filtered = [e for e in events if start <= datetime.fromisoformat(e['date']) < end]
 filtered.sort(key=lambda x: x['date'])
 
-# --- 要約生成（英語モデルで日本語も可能） ---
+# --- 日本語ルールベース要約 ---
 def generate_summary(text):
-    if not HF_TOKEN:
-        return "要約生成エラー: HF_TOKEN が未設定です"
+    if not text.strip():
+        return "本日は大きな材料が少ないものの、個別指標には注意が必要です。"
 
-    url = "https://api-inference.huggingface.co/models/facebook/bart-large-cnn"
-    headers = {"Authorization": f"Bearer {HF_TOKEN}"}
-    payload = {"inputs": text}
-    try:
-        res = requests.post(url, headers=headers, json=payload, timeout=30)
-        res.raise_for_status()
-        summary = res.json()[0].get("summary_text", "")
-        return summary
-    except Exception as e:
-        return f"要約生成失敗: {e}"
+    keywords = ["GDP", "インフレ", "消費者信頼感", "貿易収支", "住宅"]
+    highlights = [line for line in text.split(". ") if any(k in line for k in keywords)]
+
+    if highlights:
+        summary = "本日は以下の重要指標に注目です：\n"
+        for item in highlights:
+            summary += f"- {item.strip()}\n"
+    else:
+        summary = "本日は目立った注目指標はないものの、市場の変動には注意が必要です。"
+
+    return summary + "\n特に発表時刻前後の値動きに注意してください。"
 
 # --- 指標一覧テキスト生成 ---
 def format_events(events):
@@ -64,13 +64,9 @@ def format_events(events):
         lines.append(f"【{e['country']}】{time_str} （{e['title']}）（{stars}）")
     return "\n".join(lines) if lines else "本日は対象通貨の重要指標がありません。"
 
-# --- GPT要約の文章テンプレ（英語モデル対応形式） ---
-events_text = ". ".join([f"{e['title']} ({e['country']})" for e in filtered])
+# --- 要約文生成用テキスト ---
+events_text = ". ".join([f"{e['title']}（{e['country']}）" for e in filtered])
 summary = generate_summary(events_text)
-if not summary.strip():
-    summary = "本日は大きな材料が少ないものの、個別指標には注意が必要です。"
-else:
-    summary += "\n特に発表時刻前後の値動きに注意してください。"
 
 # --- Slackメッセージ生成 ---
 header = ":chart_with_upwards_trend: 本日の重要経済指標（7通貨・★1以上）"
