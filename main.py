@@ -5,9 +5,9 @@ import requests
 # 通知用Webhookの取得
 webhook = os.environ.get("SLACK_WEBHOOK")
 
-# 送信するSlackメッセージ（テスト）
+# Slack通知用メッセージ
 payload = {
-    "text": ":bug: Slack通知テスト - デバッグ用"
+    "text": ":bug: Slack通知テスト（デバッグ用）"
 }
 
 # --- デバッグ出力 ---
@@ -20,4 +20,3 @@ try:
     print(">>> Slack response body:", response.text)
 except Exception as e:
     print(">>> Slack POST Error:", e)
-
