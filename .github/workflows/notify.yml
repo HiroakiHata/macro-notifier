@@ -11,7 +11,7 @@ notify:
 runs-on: ubuntu-latest
 env:
 SLACK\_WEBHOOK: \${{ secrets.SLACK\_WEBHOOK }}
-TE\_API\_KEY: \${{ secrets.TE\_API\_KEY }}
+TRADING\_ECONOMICS\_API\_KEY: \${{ secrets.TRADING\_ECONOMICS\_API\_KEY }}
 HF\_TOKEN: \${{ secrets.HF\_TOKEN }}
 steps:
 \- name: Checkout repository
