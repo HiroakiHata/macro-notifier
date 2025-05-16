@@ -2,16 +2,14 @@ import os, json, socket, requests
 from datetime import datetime, date, timedelta, timezone
 
 """
-Forex‑Factory JSON Notifier – v4 (時間ずれ補正)
----------------------------------------------
-■ 改良点
-1. *「本日 + 翌日」の 2 日分* をチェック
-   - JST では早朝 00‑05 時台の指標が前日扱いになるため重複除外済み
-2. Slack へ **ヒット件数** を出力 （デバッグしやすい）
-3. rows==0 のときは  ⚠ 表示行 + raw 件数 を送信して原因を追いやすく
-
-依存： requests のみ
-Secrets： SLACK_WEBHOOK
+Forex‑Factory JSON Notifier – v5 (国コード判定に変更)
+--------------------------------------------------
+■ 変更点
+1. *通貨コード( currency ) ベース* で 7 通貨を判定
+   USD / EUR / GBP / JPY / CNY / AUD / NZD
+   → 国名の微妙な表記揺れを排除
+2. impact は 2 (Medium) 以上を採用（int / str どちらでも可）
+3. rows==0 の場合 Slack に採用条件と raw 件数を付記
 """
 
 SLACK_WEBHOOK = os.getenv("SLACK_WEBHOOK")
@@ -23,7 +21,7 @@ JSON_SOURCES = [
     "https://nfs.faireconomy.media/ff_calendar_thisweek.json",
 ]
 
-UA = {"User-Agent": "macro-notifier/1.1"}
+UA = {"User-Agent": "macro-notifier/1.2"}
 
 resp = None
 for url in JSON_SOURCES:
@@ -47,27 +45,18 @@ except Exception as e:
     requests.post(SLACK_WEBHOOK, json={"text": f"⚠️ JSON パースエラー: {e}"})
     raise
 
-TARGET_COUNTRIES = {
-    "United States", "Euro Area", "United Kingdom",
-    "Japan", "China", "Australia", "New Zealand",
-}
-TARGET_IMPACT = {"2", "3"}
+TARGET_CCY = {"USD", "EUR", "GBP", "JPY", "CNY", "AUD", "NZD"}
 
-# 今日+明日 (ローカル日付) セット
 jst = timezone(timedelta(hours=9))
-today = datetime.now(jst).date()
+ today = datetime.now(jst).date()
 check_dates = {today, today + timedelta(days=1)}
 
 rows = []
 for ev in events:
-    # --- 日付取り出し ---
-    ev_date = ev.get("date")
-    if not ev_date:
-        y = ev.get("y") or ev.get("year")
-        m = ev.get("m") or ev.get("month")
-        d = ev.get("d") or ev.get("day")
-        if y and m and d:
-            ev_date = f"{int(y):04d}-{int(m):02d}-{int(d):02d}"
+    # --- 日付判定 ---
+    ev_date = ev.get("date") or (lambda y,m,d: f"{y:04d}-{m:02d}-{d:02d}" if (y and m and d) else None)(
+        ev.get("year") or ev.get("y"), ev.get("month") or ev.get("m"), ev.get("day") or ev.get("d")
+    )
     if not ev_date:
         continue
     try:
@@ -75,32 +64,33 @@ for ev in events:
     except ValueError:
         continue
 
-    # 00‑05 時台は前日表示のまま→ 翌日扱いに補正
-    t_str = ev.get("time", "00:00")
+    time_str = ev.get("time", "00:00")
     try:
-        h = int(t_str.split(":")[0])
+        hour = int(time_str.split(":")[0])
     except ValueError:
-        h = 0
-    if d_obj == today - timedelta(days=1) and h < 6:
+        hour = 0
+    if d_obj == today - timedelta(days=1) and hour < 6:
         d_obj = today
 
     if d_obj not in check_dates:
         continue
 
-    if ev.get("country") not in TARGET_COUNTRIES:
+    ccy = ev.get("currency")
+    if ccy not in TARGET_CCY:
         continue
-    impact = str(ev.get("impact", "0"))
-    if impact not in TARGET_IMPACT:
+
+    impact_val = str(ev.get("impact", "0"))
+    if int(impact_val) < 2:
         continue
 
     title = ev.get("title") or ev.get("event") or "不明"
-    star = "★" * int(impact)
-    rows.append(f"【{ev['country']}】{t_str} （{title}）（{star}）")
+    star = "★" * int(impact_val)
+    rows.append(f"【{ccy}】{time_str} （{title}）（{star}）")
 
-header = ":chart_with_upwards_trend: *本日の重要経済指標（7カ国・★2以上）*\n\n"
+header = ":chart_with_upwards_trend: *本日の重要経済指標（7通貨・★2以上）*\n\n"
 if rows:
     body = "\n".join(rows)
 else:
-    body = "本日は対象国の重要指標がありません。（raw 件数: %d）" % len(events)
+    body = f"本日は対象通貨の重要指標がありません。（raw 件数: {len(events)}）"
 
 requests.post(SLACK_WEBHOOK, json={"text": header + body})
