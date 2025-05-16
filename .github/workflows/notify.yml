@@ -1,31 +1,30 @@
-import os
-import json
-import requests
+name: Daily Macro Notifier
 
-# 通知用Webhookの取得
-webhook = os.environ.get("SLACK_WEBHOOK")
+on:
+  schedule:
+    # 平日08:00 JSTに自動実行（UTC 23:00）
+    - cron: '0 23 * * 1-5'
+  workflow_dispatch:
 
-# 送信するSlackメッセージ（テスト）
-payload = {
-    "text": ":bug: Slack通知テスト - デバッグ用"
-}
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    env:
+      SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+      TRADING_ECONOMICS_API_KEY: ${{ secrets.TRADING_ECONOMICS_API_KEY }}
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-# --- デバッグ出力 ---
-print("\n========== Slack通知デバッグ ==========")
-print("[Webhook URL]", webhook)
-print("[送信内容]", json.dumps(payload, ensure_ascii=False))
-print("======================================\n")
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
 
-# SlackへPOSTリクエスト
-try:
-    if not webhook:
-        raise RuntimeError("SLACK_WEBHOOKが取得できていません。環境変数を確認してください。")
+      - name: Install dependencies
+        run: pip install -r requirements.txt
 
-    response = requests.post(webhook, json=payload)
-    print(">>> Slack HTTP status:", response.status_code)
-    print(">>> Slack response body:", response.text)
+      - name: Run notifier
+        run: python main.py
 
-    if response.status_code != 200:
-        raise RuntimeError(f"Slack通知失敗: {response.status_code} - {response.text}")
-except Exception as e:
-    print(">>> Slack POST Error:", e)
