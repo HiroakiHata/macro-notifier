@@ -86,3 +86,4 @@ header = ":chart_with_upwards_trend: *本日の重要経済指標（7カ国・�
 body   = "\n".join(results) if results else "本日は対象国の重要指標がありません。"
 
 requests.post(slack_webhook, json={"text": header + body})
+
