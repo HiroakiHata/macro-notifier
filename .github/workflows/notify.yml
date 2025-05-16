@@ -31,3 +31,4 @@ uses: actions/checkout\@v3
   - name: Run notifier
     run: python main.py
 ```
+
