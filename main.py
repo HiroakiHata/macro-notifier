@@ -1,3 +1,5 @@
+import requests
+
 # 経済指標の整形（例）
 header = ":chart_with_upwards_trend: 本日の重要経済指標（7通貨・★1以上）"
 content = "【USD】21:30（PPI m/m）（★★★）\n【JPY】08:50（GDP q/q）（★★）\n..."
