@@ -2,10 +2,10 @@ import os, json, socket, requests
 from datetime import datetime, timedelta, timezone
 
 """
-Forex‑Factory JSON Notifier – v5.3 (fix header/body quoting)
+Forex‑Factory JSON Notifier – v5.4 (include ★1以上)
 -------------------------------------------------------------
 * 通貨コード: USD/EUR/GBP/JPY/CNY/AUD/NZD を判定
-* impact: Low=1, Medium=2, High=3 → 2 以上を抽出
+* impact: Low=1, Medium=2, High=3 → 1 以上を抽出
 * 00‑05 時台の深夜指標は当日扱い
 * 今日＆明日の2日分を対象
 * JSON 取得失敗 or パース失敗時は Slack にエラー通知
@@ -20,7 +20,7 @@ JSON_SOURCES = [
     "https://cdn-nfs.faireconomy.media/ff_calendar_thisweek.json",
     "https://nfs.faireconomy.media/ff_calendar_thisweek.json",
 ]
-UA = {"User-Agent": "macro-notifier/1.3"}
+UA = {"User-Agent": "macro-notifier/1.4"}
 
 # ---- JSON 取得 ----
 resp = None
@@ -49,13 +49,13 @@ except Exception as e:
 # ---- フィルタ条件 ----
 TARGET_CCY   = {"USD", "EUR", "GBP", "JPY", "CNY", "AUD", "NZD"}
 IMPACT_MAP   = {"Low": 1, "Medium": 2, "High": 3}
-TARGET_LEVEL = 2  # ★2 以上
+TARGET_LEVEL = 1  # ★1 以上
 
 jst         = timezone(timedelta(hours=9))
 now         = datetime.now(jst)
 check_dates = { now.date(), (now + timedelta(days=1)).date() }
 
-# ---- 抽出処理 ----
+# ---- 抽出処理 ----nrows = []
 rows = []
 for ev in events:
     # ISO datetime 解析
@@ -103,7 +103,7 @@ for ev in events:
     rows.append(f"【{ccy}】{time_str} （{title}）（{star}）")
 
 # ---- Slack 通知 ----
-header = ":chart_with_upwards_trend: *本日の重要経済指標（7通貨・★2以上）*\n\n"
+header = ":chart_with_upwards_trend: *本日の重要経済指標（7通貨・★1以上）*\n\n"
 if rows:
     body = "\n".join(rows)
 else:
