@@ -15,11 +15,22 @@ end = (now + timedelta(days=1)).replace(hour=6, minute=0, second=0, microsecond=
 
 # --- Trading Economics APIのモック（ここはAPI取得に差し替える） ---
 events = [
-  {"title": "Prelim GDP q/q", "country": "JPY", "date": "2025-05-16T08:50:00+09:00", "impact": "High"},
-  {"title": "Housing Starts", "country": "USD", "date": "2025-05-16T21:30:00+09:00", "impact": "Medium"},
   {"title": "BusinessNZ Manufacturing Index", "country": "NZD", "date": "2025-05-16T07:30:00+09:00", "impact": "Low"},
-  {"title": "Empire State Manufacturing Index", "country": "USD", "date": "2025-05-16T22:00:00+09:00", "impact": "Medium"},
-  {"title": "Retail Sales m/m", "country": "USD", "date": "2025-05-16T21:30:00+09:00", "impact": "High"}
+  {"title": "Prelim GDP Price Index y/y", "country": "JPY", "date": "2025-05-16T08:50:00+09:00", "impact": "Low"},
+  {"title": "Prelim GDP q/q", "country": "JPY", "date": "2025-05-16T08:50:00+09:00", "impact": "Low"},
+  {"title": "Inflation Expectations q/q", "country": "NZD", "date": "2025-05-16T12:00:00+09:00", "impact": "Medium"},
+  {"title": "Revised Industrial Production m/m", "country": "JPY", "date": "2025-05-16T13:30:00+09:00", "impact": "Low"},
+  {"title": "Italian Trade Balance", "country": "EUR", "date": "2025-05-16T18:00:00+09:00", "impact": "Low"},
+  {"title": "Trade Balance", "country": "EUR", "date": "2025-05-16T18:00:00+09:00", "impact": "Low"},
+  {"title": "EU Economic Forecasts", "country": "EUR", "date": "2025-05-16T18:03:00+09:00", "impact": "Low"},
+  {"title": "Building Permits", "country": "USD", "date": "2025-05-16T21:30:00+09:00", "impact": "Low"},
+  {"title": "Housing Starts", "country": "USD", "date": "2025-05-16T21:30:00+09:00", "impact": "Low"},
+  {"title": "Import Prices m/m", "country": "USD", "date": "2025-05-16T21:30:00+09:00", "impact": "Low"},
+  {"title": "FOMC Member Barkin Speaks", "country": "USD", "date": "2025-05-16T21:30:00+09:00", "impact": "Low"},
+  {"title": "Prelim UoM Consumer Sentiment", "country": "USD", "date": "2025-05-16T23:00:00+09:00", "impact": "High"},
+  {"title": "Prelim UoM Inflation Expectations", "country": "USD", "date": "2025-05-16T23:00:00+09:00", "impact": "High"},
+  {"title": "MPC Member Lombardelli Speaks", "country": "GBP", "date": "2025-05-17T00:00:00+09:00", "impact": "Low"},
+  {"title": "TIC Long-Term Purchases", "country": "USD", "date": "2025-05-17T05:00:00+09:00", "impact": "Low"}
 ]
 
 # --- 絞り込み（★1以上 & 6:01〜翌6:00） ---
@@ -27,12 +38,12 @@ impact_stars = {"Low": 1, "Medium": 2, "High": 3}
 filtered = [e for e in events if start <= datetime.fromisoformat(e['date']) < end]
 filtered.sort(key=lambda x: x['date'])
 
-# --- 要約生成（HuggingFace API） ---
+# --- 要約生成（HuggingFace API、日本語モデル） ---
 def generate_summary(text):
     if not HF_TOKEN:
         return "要約生成エラー: HF_TOKEN が未設定です"
 
-    url = "https://api-inference.huggingface.co/models/facebook/bart-large-cnn"
+    url = "https://api-inference.huggingface.co/models/sonoisa/t5-base-japanese-summary"
     headers = {"Authorization": f"Bearer {HF_TOKEN}"}
     payload = {"inputs": text}
     try:
@@ -54,7 +65,7 @@ def format_events(events):
     return "\n".join(lines) if lines else "本日は対象通貨の重要指標がありません。"
 
 # --- GPT要約の文章テンプレ（簡易） ---
-events_text = ", ".join([f"{e['title']}（{e['country']}）" for e in filtered])
+events_text = "。".join([f"{e['country']}の{e['title']}" for e in filtered])
 summary = generate_summary(events_text)
 if not summary.strip():
     summary = "本日は大きな材料が少ないものの、個別指標には注意が必要です。"
@@ -80,3 +91,4 @@ if SLACK_WEBHOOK:
         print("Slack通知失敗:", e)
 else:
     print("Slack Webhookが未設定です")
+
