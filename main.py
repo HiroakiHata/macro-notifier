@@ -1,89 +1,70 @@
 import os
+import json
+from datetime import datetime, timezone
+import cloudscraper  # Cloudflare 回避用
 import requests
-from datetime import datetime, timedelta, timezone
-import urllib.parse
 
 """
-Macro Notifier – Trading Economics → Slack
--------------------------------------------
-1.  GitHub Actions の `env:` で渡される 2 つの環境変数を取得する
-      - SLACK_WEBHOOK
-      - TRADING_ECONOMICS_API_KEY
-2.  当日‑翌日分の経済カレンダーを取得（★2 以上 / 7 カ国）
-3.  注目ワードに一致する指標だけを抽出
-4.  結果を Slack にポスト（無ければ「ありません」）
-
-※ 500 エラーやキー未設定時は詳細を Slack に送って調査しやすくする。
+Free‑tier でも取れる **Forex Factory JSON** を使う版
+------------------------------------------------------
+  • API キー不要（スクレイピング）
+  • Cloudflare 403 を避けるため cloudscraper を利用
+  • 重要度★2 以上のみ／7カ国（US‑EU‑UK‑JP‑CN‑AU‑NZ）
 """
 
-# ===== 1. 環境変数取得 =====
-slack_webhook = os.getenv("SLACK_WEBHOOK")
-api_key       = os.getenv("TRADING_ECONOMICS_API_KEY")  # ← Secrets 名と必ず一致させる
+# ===== Secrets =====
+SLACK_WEBHOOK = os.getenv("SLACK_WEBHOOK")
+if not SLACK_WEBHOOK:
+    raise ValueError("❌ SLACK_WEBHOOK が設定されていません。GitHub Secrets を確認してください。")
 
-if not slack_webhook:
-    raise ValueError("❌ 環境変数 SLACK_WEBHOOK が取得できません。Secrets 設定を確認してください。")
-if not api_key:
-    raise ValueError("❌ 環境変数 TRADING_ECONOMICS_API_KEY が取得できません。Secrets 設定を確認してください。")
+# ===== 取得元 URL =====
+FF_URL = "https://cdn-nfs.faireconomy.media/ff_calendar_thisweek.json"
 
-encoded_key = urllib.parse.quote(str(api_key))
+# ===== Cloudflare 回避リクエスト =====
+scraper = cloudscraper.create_scraper()
+resp = scraper.get(FF_URL, timeout=30)
+print("Status:", resp.status_code)
 
-# ===== 2. 日付範囲 =====
-now_utc = datetime.now(timezone.utc)
-d1 = now_utc.strftime("%Y-%m-%d")
-d2 = (now_utc + timedelta(days=1)).strftime("%Y-%m-%d")
+if resp.status_code != 200:
+    requests.post(SLACK_WEBHOOK, json={"text": f"❌ ForexFactory 取得失敗 {resp.status_code}: {resp.text[:200]}"})
+    raise SystemExit("Fetch failed")
 
-# ===== 3. API リクエスト =====
-base = (
-    "https://api.tradingeconomics.com/calendar/country/"
-    "United%20States,Euro%20Area,United%20Kingdom,Japan,China,Australia,New%20Zealand"
-)
-url = f"{base}?c={encoded_key}&d1={d1}&d2={d2}&importance=2&f=json"
-print("Request URL:", url)
-
+# ===== JSON パース =====
 try:
-    response = requests.get(url, timeout=30)
-except Exception as e:
-    requests.post(slack_webhook, json={"text": f"❌ API接続エラー: {e}"})
-    raise
-
-print("Status:", response.status_code)
-
-if response.status_code != 200:
-    # 失敗時のレスポンスをそのまま Slack 通知
-    requests.post(slack_webhook, json={"text": f"❌ API Error {response.status_code}: {response.text}"})
-    raise SystemExit("API Error")
-
-try:
-    events = response.json()
-except ValueError as e:
-    requests.post(slack_webhook, json={"text": f"❌ JSON パースエラー: {e}\nBody: {response.text[:400]}"})
+    events = resp.json()
+except json.JSONDecodeError as e:
+    requests.post(SLACK_WEBHOOK, json={"text": f"❌ JSON パースエラー: {e}"})
     raise
 
 if not isinstance(events, list):
-    requests.post(slack_webhook, json={"text": f"❌ 予期しないレスポンス形式: {events}"})
-    raise SystemExit("Unexpected response format")
+    requests.post(SLACK_WEBHOOK, json={"text": f"❌ 想定外の形式: {events}"})
+    raise SystemExit("Unexpected format")
 
-# ===== 4. フィルター処理 =====
-TARGET_WORDS = [
-    "CPI", "雇用", "FOMC", "政策金利", "失業率", "PMI", "GDP", "小売", "消費者信頼感", "景況感"
-]
+# ===== 今日の日付 (UTC→ローカル JP) =====
+now_jst = datetime.now(timezone.utc).astimezone()
+today_str = now_jst.strftime("%Y-%m-%d")
+
+TARGET_COUNTRIES = {
+    "United States", "Euro Area", "United Kingdom", "Japan",
+    "China", "Australia", "New Zealand"
+}
+
 results = []
-
 for ev in events:
-    if not isinstance(ev, dict):
+    if ev.get("date") != today_str:
         continue
-    country = ev.get("Country", "")
-    importance = ev.get("Importance", 0)
-    title = ev.get("Event", "不明")
-    time_iso = ev.get("Date", ev.get("DateTime", ""))
-    time_str = time_iso[11:16] if len(time_iso) >= 16 else time_iso
+    if ev.get("country") not in TARGET_COUNTRIES:
+        continue
+    if int(ev.get("impact", 0)) < 2:
+        continue
+    time = ev.get("time", "")
+    title = ev.get("title", "不明")
+    star  = "★" * int(ev.get("impact", 0))
+    country = ev.get("country")
+    results.append(f"【{country}】{time} （{title}）（{star}）")
 
-    if any(word in title for word in TARGET_WORDS):
-        results.append(f"【{country}】{time_str} （{title}）（★{importance}）")
-
-# ===== 5. Slack へ通知 =====
-header = ":chart_with_upwards_trend: *本日の重要経済指標（7カ国・★2以上 + 注目ワード一致）*\n\n"
-body   = "\n".join(results) if results else "本日は対象国の重要指標がありません。"
-
-requests.post(slack_webhook, json={"text": header + body})
+# ===== Slack へ通知 =====
+header = ":bar_chart: *本日の重要経済指標（7カ国・★2以上）*\n\n"
+body = "\n".join(results) if results else "本日は対象国の重要指標がありません。"
+requests.post(SLACK_WEBHOOK, json={"text": header + body})
 
