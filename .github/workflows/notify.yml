@@ -11,7 +11,10 @@ payload = {
 }
 
 # --- デバッグ出力 ---
-print(">>> SLACK_WEBHOOK:", webhook)
+print("\n========== Slack通知デバッグ ==========")
+print("[Webhook URL]", webhook)
+print("[送信内容]", json.dumps(payload, ensure_ascii=False))
+print("======================================\n")
 
 # SlackへPOSTリクエスト
 try:
