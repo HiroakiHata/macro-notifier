@@ -1,36 +1,49 @@
 import os
-import urllib.parse
 import requests
-from datetime import datetime, timezone
+import datetime
 
-# 1. APIキーを環境変数から取得
-api_key = os.getenv("TRADING_ECONOMICS_API_KEY")
+# ================== 環境変数取得 ==================
+api_key = os.environ.get("TRADING_ECONOMICS_API_KEY")
+webhook = os.environ.get("SLACK_WEBHOOK")
 
-# 2. 取得できていない場合はエラーで止める
 if not api_key:
     raise ValueError("❌ APIキーが環境変数から取得できていません。GitHub Secretsに 'TRADING_ECONOMICS_API_KEY' を設定してください。")
+if not webhook:
+    raise ValueError("❌ Slack Webhookが環境変数から取得できていません。GitHub Secretsに 'SLACK_WEBHOOK' を設定してください。")
 
-# 3. APIキーをURLエンコード（必ず文字列型に変換）
-encoded_key = urllib.parse.quote(str(api_key))
+# ================== 日付取得 ==================
+today = datetime.datetime.utcnow().strftime("%Y-%m-%d")
 
-# 4. 今日の日付をUTCで取得
-today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-
-# 5. APIエンドポイントURL
-url = f"https://api.tradingeconomics.com/calendar?c={encoded_key}&d1={today}&d2={today}&f=json"
-
-# 6. リクエスト送信
+# ================== データ取得 ==================
+url = f"https://api.tradingeconomics.com/calendar/country/United States,Euro Area,United Kingdom,Japan,China,Australia,New Zealand?c={api_key}&d1={today}&importance=2&f=json"
 res = requests.get(url)
 
 print(f"レスポンスステータス: {res.status_code}")
 print(f"レスポンス内容: {res.text}")
 
-# 7. 成功時のみJSONとして処理
-if res.status_code == 200:
-    try:
-        data = res.json()
-        print(f"取得されたイベント数: {len(data)}")
-    except Exception as e:
-        print(f"❌ JSONパース失敗: {e}")
+if res.status_code != 200:
+    raise Exception(f"⚠️ APIエラーが発生しました: {res.text}")
+
+try:
+    data = res.json()
+except Exception:
+    raise ValueError(f"JSONパース失敗 or 異常形式: JSONデータがリスト形式ではありません。内容: {res.text}")
+
+if not isinstance(data, list):
+    raise ValueError(f"JSONデータがリスト形式ではありません。内容: {data}")
+
+# ================== メッセージ整形 ==================
+message = ":chart_with_upwards_trend: *本日の重要経済指標（7カ国・★2以上）*\n"
+
+if not data:
+    message += "本日は対象国の重要指標がありません。"
 else:
-    print("❌ APIリクエストに失敗しました。")
+    for event in data:
+        country = event.get("Country", "不明")
+        date_time = event.get("Date", "")
+        importance = event.get("Importance", "")
+        star = "★" * int(importance) if importance.isdigit() else ""
+        message += f"【{country}】{date_time}　（{star}）\n"
+
+# ================== Slack通知 ==================
+requests.post(webhook, json={"text": message})
