@@ -76,3 +76,11 @@ def send_to_slack(rows):
 if __name__ == "__main__":
     events = scrape_events()
     send_to_slack(events)
+
+if __name__ == "__main__":
+    events = scrape_events()
+    print("取得されたイベント数:", len(events))
+    for e in events:
+        print(e)  # ← 取得できてる内容を確認
+    send_to_slack(events)
+
