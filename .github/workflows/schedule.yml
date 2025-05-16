@@ -1,20 +1,30 @@
 name: Daily Macro Notifier
 
 on:
-  schedule:
-    - cron: "0 23 * * *"  # 日本時間8:00（UTC+0で23:00）
   workflow_dispatch:
+  schedule:
+    - cron: '0 23 * * *'   # 08:00 JST 毎日
 
 jobs:
   notify:
     runs-on: ubuntu-latest
+    # --- Secrets を環境変数として渡す -------------------------
+    env:
+      SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+      TRADING_ECONOMICS_API_KEY: ${{ secrets.TRADING_ECONOMICS_API_KEY }}
+    # ----------------------------------------------------------
+
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-python@v4
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
         with:
-          python-version: '3.x'
-      - run: pip install -r requirements.txt
-      - run: python main.py
-        env:
-          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
-          TE_API_KEY: ${{ secrets.TE_API_KEY }}
+          python-version: '3.10'
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Run notifier
+        run: python main.py
