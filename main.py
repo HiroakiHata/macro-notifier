@@ -9,3 +9,4 @@ summary = ":bookmark_tabs: 要約レポート\n本日は米国のPPIが市場の
 payload = {
     "text": f"{header}\n{content}\n\n{summary}"
 }
+requests.post(webhook, json=payload)
