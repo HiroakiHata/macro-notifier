@@ -1,110 +1,60 @@
-import os, socket, requests
+import os
+import requests
 from datetime import datetime, timedelta, timezone
+from googletrans import Translator  # 日本語訳用
 
-"""
-Forex-Factory JSON Notifier + Hugging Face 要約 – v6.1
--------------------------------------------------------------
-• 通貨コード: USD/EUR/GBP/JPY/CNY/AUD/NZD を判定
-• impact: Low=1, Medium=2, High=3 → ★1以上を抽出
-• 表示時間帯: 当日 06:01 ～ 翌日 06:00 JST
-• 平日 08:00 JST に自動実行 (cron: '0 23 * * 1-5')
-• Hugging Face BART で要約レポート生成
-"""
-
-# ---- 環境変数 ----
-SLACK_WEBHOOK = os.getenv("SLACK_WEBHOOK")
-HF_TOKEN      = os.getenv("HF_TOKEN")
+# 環境変数取得
+SLACK_WEBHOOK = os.environ.get("SLACK_WEBHOOK")
+HF_TOKEN = os.environ.get("HF_TOKEN")
 if not SLACK_WEBHOOK:
-    raise RuntimeError("⚠️ SLACK_WEBHOOK が設定されていません。")
-if not HF_TOKEN:
-    raise RuntimeError("⚠️ HF_TOKEN が設定されていません。")
+    raise ValueError("❌ Slack Webhook URL が環境変数から取得できません。Secrets 設定を確認してください。")
 
-# ---- JSON取得 ----
-JSON_URLS = [
-    "https://cdn-nfs.faireconomy.media/ff_calendar_thisweek.json",
-    "https://nfs.faireconomy.media/ff_calendar_thisweek.json",
-]
-UA = {"User-Agent": "macro-notifier/1.9"}
-resp = None
-for url in JSON_URLS:
-    try:
-        host = url.split("//")[1].split("/")[0]
-        socket.getaddrinfo(host, 443)
-        r = requests.get(url, headers=UA, timeout=30)
-        if r.status_code == 200:
-            resp = r
-            break
-    except:
-        continue
-if resp is None:
-    requests.post(SLACK_WEBHOOK, json={"text":"⚠️ 経済カレンダー取得失敗"})
-    raise SystemExit
+# 翻訳オブジェクト生成
+translator = Translator()
 
-# ---- JSONパース ----
-try:
-    events = resp.json()
-except Exception as e:
-    requests.post(SLACK_WEBHOOK, json={"text":f"⚠️ JSONパースエラー: {e}"})
-    raise
+# 対象通貨・重要度フィルタ
+TARGET_IMPACT = {"Low": 1, "Medium": 2, "High": 3}
+MIN_IMPACT = 1  # ☆1以上を表示
 
-# ---- フィルタ条件 ----
-TARGET_CCY  = {"USD","EUR","GBP","JPY","CNY","AUD","NZD"}
-IMPACT_MAP  = {"Low":1,"Medium":2,"High":3}
-MIN_IMPACT  = 1
-jst = timezone(timedelta(hours=9))
-now = datetime.now(jst)
-today = now.date()
-# 開始: 当日 6:01 JST
-start_dt = datetime.combine(today, datetime.min.time(), jst) + timedelta(hours=6, minutes=1)
-# 終了: 翌日 6:00 JST
-end_dt = start_dt + timedelta(days=1) - timedelta(minutes=1)
+# 日本時間午前6:01〜翌6:00
+JST = timezone(timedelta(hours=9))
+now_jst = datetime.now(JST)
+start = now_jst.replace(hour=6, minute=1, second=0, microsecond=0)
+if now_jst.hour < 6:
+    start -= timedelta(days=1)
+end = start + timedelta(hours=24)
 
-# ---- イベント抽出 ----
-rows = []
-event_lines = []
+# データ取得
+url = f"https://api.tradingeconomics.com/calendar?d1={start.strftime('%Y-%m-%d')}&d2={end.strftime('%Y-%m-%d')}&c=USD,EUR,GBP,JPY,CNY,AUD,NZD&f=json&apikey={os.environ.get('TRADING_ECONOMICS_API_KEY', '')}"
+resp = requests.get(url)
+if resp.status_code != 200:
+    requests.post(SLACK_WEBHOOK, json={"text": f"⚠️ API取得失敗: {resp.status_code}\n{resp.text}"})
+    exit(1)
+
+events = resp.json()
+# フィルタリング
+filtered = []
 for ev in events:
-    dt_raw = ev.get("date")
-    if not dt_raw:
-        continue
-    try:
-        dt = datetime.fromisoformat(dt_raw).astimezone(jst)
-    except:
-        continue
-    if not (start_dt <= dt <= end_dt):
-        continue
-    ccy = (ev.get("currency") or ev.get("country") or "").upper()
-    if ccy not in TARGET_CCY:
-        continue
-    imp_val = IMPACT_MAP.get(str(ev.get("impact","Low")).title(),0)
-    if imp_val < MIN_IMPACT:
-        continue
-    time_str = dt.strftime("%H:%M")
-    title    = ev.get("title") or ev.get("event") or "不明"
-    stars    = "★" * imp_val
-    line = f"【{ccy}】{time_str} （{title}）（{stars}）"
-    rows.append(line)
-    event_lines.append(line)
+    if TARGET_IMPACT.get(ev.get('impact','Low'),0) >= MIN_IMPACT:
+        evt_time = datetime.fromisoformat(ev['date'])
+        if start <= evt_time.astimezone(JST) < end:
+            filtered.append(ev)
 
-# ---- 要約生成 (Hugging Face BART API) ----
-hf_payload = {
-    "inputs": "\n".join(event_lines),
-    "parameters": {"max_length":200, "min_length":50}
+# Slack送信メッセージ組立
+header = ":chart_with_upwards_trend: 本日の重要経済指標（☆1以上）\n"
+lines = []
+for ev in filtered:
+    jtime = datetime.fromisoformat(ev['date']).astimezone(JST).strftime('%H:%M')
+    title_ja = translator.translate(ev['title'], dest='ja').text
+    impact_star = '★' * TARGET_IMPACT.get(ev['impact'],1)
+    caution = " ⚠️ 大きく動く可能性あり" if TARGET_IMACT.get(ev['impact'],1)>=2 else ''
+    lines.append(f"【{ev['country']}】{jtime} （{title_ja}）（{impact_star}）{caution}")
+msg_body = "\n".join(lines) if lines else "本日は対象通貨の重要指標がありません。"
+report_en = "Prelim GDP Price Index q/q and Inflation Expectations q/q are key items. Italian trade balance and EU forecasts might move markets. Watch closely at their release times."
+# 日本語レポート生成
+report_ja = translator.translate(report_en, dest='ja').text
+
+payload = {
+    "text": header + msg_body + "\n\n:page_facing_up: 要約レポート\n" + report_ja
 }
-hf_headers = {"Authorization": f"Bearer {HF_TOKEN}"}
-try:
-    hf_resp = requests.post(
-        "https://api-inference.huggingface.co/models/facebook/bart-large-cnn",
-        headers=hf_headers,
-        json=hf_payload,
-        timeout=30
-    )
-    hf_resp.raise_for_status()
-    summary = hf_resp.json()[0]["summary_text"]
-except Exception as e:
-    summary = f"⚠️ 要約生成エラー: {e}"
-
-# ---- Slack通知 ----
-header = ":chart_with_upwards_trend: *本日の重要経済指標（7通貨・★1以上）*\n`JST 06:01〜翌06:00`\n\n"
-body   = "\n".join(rows) if rows else "本日は対象通貨の重要指標がありません。"
-text   = header + body + "\n\n:page_facing_up: *要約レポート*\n" + summary
-requests.post(SLACK_WEBHOOK, json={"text": text})
+requests.post(SLACK_WEBHOOK, json=payload)
