@@ -2,7 +2,7 @@ import os, json, socket, requests
 from datetime import datetime, timedelta, timezone
 
 """
-Forex‑Factory JSON Notifier – v5.2 (syntax fix for header/body)
+Forex‑Factory JSON Notifier – v5.3 (fix header/body quoting)
 -------------------------------------------------------------
 * 通貨コード: USD/EUR/GBP/JPY/CNY/AUD/NZD を判定
 * impact: Low=1, Medium=2, High=3 → 2 以上を抽出
@@ -20,7 +20,7 @@ JSON_SOURCES = [
     "https://cdn-nfs.faireconomy.media/ff_calendar_thisweek.json",
     "https://nfs.faireconomy.media/ff_calendar_thisweek.json",
 ]
-UA = {"User-Agent": "macro-notifier/1.2"}
+UA = {"User-Agent": "macro-notifier/1.3"}
 
 # ---- JSON 取得 ----
 resp = None
@@ -51,27 +51,25 @@ TARGET_CCY   = {"USD", "EUR", "GBP", "JPY", "CNY", "AUD", "NZD"}
 IMPACT_MAP   = {"Low": 1, "Medium": 2, "High": 3}
 TARGET_LEVEL = 2  # ★2 以上
 
-jst       = timezone(timedelta(hours=9))
-now       = datetime.now(jst)
+jst         = timezone(timedelta(hours=9))
+now         = datetime.now(jst)
 check_dates = { now.date(), (now + timedelta(days=1)).date() }
 
 # ---- 抽出処理 ----
 rows = []
 for ev in events:
-    # --- ISO datetime 解析 ---
+    # ISO datetime 解析
     raw_dt = ev.get("date")
+    dt_obj = None
     if raw_dt:
         try:
-            dt_obj = datetime.fromisoformat(raw_dt)
-            # UTC or offset -> JST
-            dt_obj = dt_obj.astimezone(jst)
+            obj = datetime.fromisoformat(raw_dt)
+            dt_obj = obj.astimezone(jst)
         except Exception:
             dt_obj = None
-    else:
-        dt_obj = None
     # 年月日分割対応
     if not dt_obj:
-        y, m, d = ev.get("year") or ev.get("y"), ev.get("month") or ev.get("m"), ev.get("day") or ev.get("d")
+        y, m, d = ev.get("year"), ev.get("month"), ev.get("day")
         if y and m and d:
             try:
                 dt_obj = datetime(int(y), int(m), int(d), tzinfo=jst)
@@ -83,35 +81,31 @@ for ev in events:
     # 日付チェック
     d_obj = dt_obj.date()
     if d_obj not in check_dates:
-        # 前日深夜0-5時は当日扱い
         if d_obj == (now.date() - timedelta(days=1)) and dt_obj.hour < 6:
             d_obj = now.date()
         else:
             continue
 
-    #----- 通貨判定 -----
+    # 通貨判定
     ccy = (ev.get("currency") or ev.get("country") or "").upper()
     if ccy not in TARGET_CCY:
         continue
 
-    #----- 重要度判定 -----
+    # 重要度判定
     impact_val = IMPACT_MAP.get(str(ev.get("impact", "Low")).title(), 0)
     if impact_val < TARGET_LEVEL:
         continue
 
-    #----- 時刻とタイトル -----
+    # 時刻とタイトル
     time_str = dt_obj.strftime("%H:%M")
-    title = ev.get("title") or ev.get("event") or "不明"
-    star  = "★" * impact_val
+    title    = ev.get("title") or ev.get("event") or "不明"
+    star     = "★" * impact_val
     rows.append(f"【{ccy}】{time_str} （{title}）（{star}）")
 
 # ---- Slack 通知 ----
-header = ":chart_with_upwards_trend: *本日の重要経済指標（7通貨・★2以上）*
-
-"
+header = ":chart_with_upwards_trend: *本日の重要経済指標（7通貨・★2以上）*\n\n"
 if rows:
-    body = "
-".join(rows)
+    body = "\n".join(rows)
 else:
     body = f"本日は対象通貨の重要指標がありません。（raw 件数: {len(events)}）"
 
