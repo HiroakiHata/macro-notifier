@@ -1,31 +1,34 @@
 name: Daily Macro Notifier
 
-# 毎平日 08:00 JST に実行（UTC 23:00）
+# 平日 08:00 JST に自動実行 (UTC 23:00)
+
 on:
-  schedule:
-    - cron: '0 23 * * 1-5'
-  workflow_dispatch:
+schedule:
+\- cron: '0 23 \* \* 1-5'
+workflow\_dispatch:
 
 jobs:
-  notify:
-    runs-on: ubuntu-latest
+notify:
+runs-on: ubuntu-latest
+env:
+SLACK\_WEBHOOK: \${{ secrets.SLACK\_WEBHOOK }}
+HF\_TOKEN:      \${{ secrets.HF\_TOKEN }}
+steps:
+\- name: Checkout repository
+uses: actions/checkout\@v3
 
-    # GitHub Secrets から読み込む
-    env:
-      SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
-      HF_TOKEN:      ${{ secrets.HF_TOKEN }}
+```
+  - name: Set up Python
+    uses: actions/setup-python@v4
+    with:
+      python-version: '3.x'
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
+  - name: Install dependencies
+    run: |
+      pip install --upgrade pip
+      pip install -r requirements.txt
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.x'
+  - name: Run notifier
+    run: python main.py
+```
 
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-
-      - name: Run notifier
-        run: python main.py
