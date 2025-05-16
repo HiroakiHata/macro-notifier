@@ -1,29 +1,36 @@
 import os
-import requests
-from datetime import datetime, timedelta, timezone
 import urllib.parse
+import requests
+from datetime import datetime, timezone
 
-slack_webhook = os.getenv("SLACK_WEBHOOK")
+# 1. APIキーを環境変数から取得
 api_key = os.getenv("TRADING_ECONOMICS_API_KEY")
-encoded_key = urllib.parse.quote(api_key)
 
-# 日付範囲指定
-today = datetime.now(timezone.utc)
-d1 = today.strftime("%Y-%m-%d")
-d2 = (today + timedelta(days=1)).strftime("%Y-%m-%d")
-url = f"https://api.tradingeconomics.com/calendar?c={encoded_key}&d1={d1}&d2={d2}&f=json"
+# 2. 取得できていない場合はエラーで止める
+if not api_key:
+    raise ValueError("❌ APIキーが環境変数から取得できていません。GitHub Secretsに 'TRADING_ECONOMICS_API_KEY' を設定してください。")
 
+# 3. APIキーをURLエンコード（必ず文字列型に変換）
+encoded_key = urllib.parse.quote(str(api_key))
+
+# 4. 今日の日付をUTCで取得
+today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+# 5. APIエンドポイントURL
+url = f"https://api.tradingeconomics.com/calendar?c={encoded_key}&d1={today}&d2={today}&f=json"
+
+# 6. リクエスト送信
 res = requests.get(url)
-print("レスポンスステータス:", res.status_code)
-print("レスポンス内容:", res.text[:300])
 
-try:
-    data = res.json()
-    if not isinstance(data, list):
-        raise ValueError("JSONデータがリスト形式ではありません。内容: " + str(data))
-except Exception as e:
-    print("JSONパース失敗 or 異常形式:", e)
-    message = f":warning: API取得失敗または形式異常\n```\n{e}\n```"
-    requests.post(slack_webhook, json={"text": message})
-    exit(1)
+print(f"レスポンスステータス: {res.status_code}")
+print(f"レスポンス内容: {res.text}")
 
+# 7. 成功時のみJSONとして処理
+if res.status_code == 200:
+    try:
+        data = res.json()
+        print(f"取得されたイベント数: {len(data)}")
+    except Exception as e:
+        print(f"❌ JSONパース失敗: {e}")
+else:
+    print("❌ APIリクエストに失敗しました。")
