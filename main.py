@@ -38,12 +38,12 @@ impact_stars = {"Low": 1, "Medium": 2, "High": 3}
 filtered = [e for e in events if start <= datetime.fromisoformat(e['date']) < end]
 filtered.sort(key=lambda x: x['date'])
 
-# --- 要約生成（HuggingFace API、日本語モデル） ---
+# --- 要約生成（HuggingFace API） ---
 def generate_summary(text):
     if not HF_TOKEN:
         return "要約生成エラー: HF_TOKEN が未設定です"
 
-    url = "https://api-inference.huggingface.co/models/sonoisa/t5-base-japanese-summary"
+    url = "https://api-inference.huggingface.co/models/taishi-i/t5-base-japanese-summary"
     headers = {"Authorization": f"Bearer {HF_TOKEN}"}
     payload = {"inputs": text}
     try:
