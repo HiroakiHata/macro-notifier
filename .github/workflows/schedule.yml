@@ -2,7 +2,7 @@ name: Daily Macro Notifier
 
 on:
   schedule:
-    - cron: '0 23 * * *'   # JST 08:00
+    - cron: "0 23 * * *"  # 日本時間8:00（UTC+0で23:00）
   workflow_dispatch:
 
 jobs:
@@ -10,13 +10,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-
       - uses: actions/setup-python@v4
         with:
-          python-version: '3.10'
-
+          python-version: '3.x'
       - run: pip install -r requirements.txt
-
-      - env:
+      - run: python main.py
+        env:
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
-        run: python main.py
+          TE_API_KEY: ${{ secrets.TE_API_KEY }}
