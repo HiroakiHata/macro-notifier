@@ -11,8 +11,9 @@ jobs:
   notify:
     runs-on: ubuntu-latest
     env:
-      SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
-      HF_TOKEN:      ${{ secrets.HF_TOKEN }}
+  SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+  TE_API_KEY: ${{ secrets.TE_API_KEY }}
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
