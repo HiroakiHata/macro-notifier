@@ -44,7 +44,7 @@ def notify_slack(events):
         print("No Slack webhook set.")
         return
 
-    message = "📊 *本日の重要経済指標（7カ国・★2以上）*
+    message = "📊 *本日の重要経済指標（7カ国・★2以上）*\n\n"
 
 "
     message += "\n".join(events) if events else "本日は対象国の重要指標がありません。"
