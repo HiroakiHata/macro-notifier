@@ -1,60 +1,83 @@
 import os
 import requests
 from datetime import datetime, timedelta, timezone
-from googletrans import Translator  # 日本語訳用
 
 # 環境変数取得
-SLACK_WEBHOOK = os.environ.get("SLACK_WEBHOOK")
-HF_TOKEN = os.environ.get("HF_TOKEN")
+SLACK_WEBHOOK = os.getenv("SLACK_WEBHOOK")
+TRADING_API_KEY = os.getenv("TRADING_ECONOMICS_API_KEY")
 if not SLACK_WEBHOOK:
-    raise ValueError("❌ Slack Webhook URL が環境変数から取得できません。Secrets 設定を確認してください。")
+    raise ValueError("❌ Slack Webhook URL が環境変数から取得できません。Secrets を確認してください。")
+if not TRADING_API_KEY:
+    raise ValueError("❌ Trading Economics API キーが環境変数から取得できません。Secrets を確認してください。")
 
-# 翻訳オブジェクト生成
-translator = Translator()
+# 翻訳用（Optional: googletrans==3.1.0a0 を requirements.txt に追加）
+try:
+    from googletrans import Translator
+    translator = Translator()
+    def to_ja(text):
+        return translator.translate(text, dest='ja').text
+except Exception:
+    def to_ja(text):
+        return text  # 翻訳不可時は原文を返す
 
-# 対象通貨・重要度フィルタ
-TARGET_IMPACT = {"Low": 1, "Medium": 2, "High": 3}
-MIN_IMPACT = 1  # ☆1以上を表示
+# フィルタ設定
+IMPACT_MAP = {'Low': 1, 'Medium': 2, 'High': 3}
+MIN_IMPACT = 1  # ★1以上
 
-# 日本時間午前6:01〜翌6:00
+# JST 6:01-翌6:00 範囲
 JST = timezone(timedelta(hours=9))
-now_jst = datetime.now(JST)
-start = now_jst.replace(hour=6, minute=1, second=0, microsecond=0)
-if now_jst.hour < 6:
+now = datetime.now(JST)
+start = now.replace(hour=6, minute=1, second=0, microsecond=0)
+if now.hour < 6:
     start -= timedelta(days=1)
-end = start + timedelta(hours=24)
+end = start + timedelta(days=1)
 
-# データ取得
-url = f"https://api.tradingeconomics.com/calendar?d1={start.strftime('%Y-%m-%d')}&d2={end.strftime('%Y-%m-%d')}&c=USD,EUR,GBP,JPY,CNY,AUD,NZD&f=json&apikey={os.environ.get('TRADING_ECONOMICS_API_KEY', '')}"
-resp = requests.get(url)
-if resp.status_code != 200:
-    requests.post(SLACK_WEBHOOK, json={"text": f"⚠️ API取得失敗: {resp.status_code}\n{resp.text}"})
-    exit(1)
+def fetch_events():
+    url = (
+        f"https://api.tradingeconomics.com/calendar"
+        f"?d1={start.date()}&d2={end.date()}"
+        f"&c=USD,EUR,GBP,JPY,CNY,AUD,NZD"
+        f"&f=json&apikey={TRADING_API_KEY}"
+    )
+    r = requests.get(url)
+    if r.status_code != 200:
+        msg = f"⚠️ API Error {r.status_code}\n{r.text}"
+        requests.post(SLACK_WEBHOOK, json={"text": msg})
+        exit(1)
+    return r.json()
 
-events = resp.json()
-# フィルタリング
+# メイン
+events = fetch_events()
 filtered = []
 for ev in events:
-    if TARGET_IMPACT.get(ev.get('impact','Low'),0) >= MIN_IMPACT:
-        evt_time = datetime.fromisoformat(ev['date'])
-        if start <= evt_time.astimezone(JST) < end:
-            filtered.append(ev)
+    if IMPACT_MAP.get(ev.get('impact','Low'),0) < MIN_IMPACT:
+        continue
+    t = datetime.fromisoformat(ev['date']).astimezone(JST)
+    if not (start <= t < end):
+        continue
+    filtered.append((ev, t))
 
-# Slack送信メッセージ組立
-header = ":chart_with_upwards_trend: 本日の重要経済指標（☆1以上）\n"
+# Slack メッセージ作成
 lines = []
-for ev in filtered:
-    jtime = datetime.fromisoformat(ev['date']).astimezone(JST).strftime('%H:%M')
-    title_ja = translator.translate(ev['title'], dest='ja').text
-    impact_star = '★' * TARGET_IMPACT.get(ev['impact'],1)
-    caution = " ⚠️ 大きく動く可能性あり" if TARGET_IMACT.get(ev['impact'],1)>=2 else ''
-    lines.append(f"【{ev['country']}】{jtime} （{title_ja}）（{impact_star}）{caution}")
-msg_body = "\n".join(lines) if lines else "本日は対象通貨の重要指標がありません。"
-report_en = "Prelim GDP Price Index q/q and Inflation Expectations q/q are key items. Italian trade balance and EU forecasts might move markets. Watch closely at their release times."
-# 日本語レポート生成
-report_ja = translator.translate(report_en, dest='ja').text
+for ev, t in filtered:
+    time_str = t.strftime('%H:%M')
+    title_ja = to_ja(ev['title'])
+    stars = '★' * IMPACT_MAP.get(ev['impact'],1)
+    caution = ' ⚠️ 大きく動く可能性あり' if IMPACT_MAP.get(ev['impact'],1) >= 2 else ''
+    lines.append(f"【{ev['country']}】{time_str} （{title_ja}）（{stars}）{caution}")
+
+header = ":chart_with_upwards_trend: 本日の重要経済指標（☆1以上）\n"
+body = "\n".join(lines) if lines else "本日は対象通貨の重要指標がありません。"
+
+# 簡易要約レポート（例：直接埋め込むか別APIで生成）
+summary_en = (
+    "Prelim GDP Price Index y/y and Inflation Expectations q/q are highlighted. "
+    "Italian Trade Balance, EU Economic Forecasts and Housing Starts may influence markets."
+)
+report = to_ja(summary_en)
 
 payload = {
-    "text": header + msg_body + "\n\n:page_facing_up: 要約レポート\n" + report_ja
+    "text": header + body + f"\n\n:page_facing_up: 要約レポート\n{report}"
 }
 requests.post(SLACK_WEBHOOK, json=payload)
+
