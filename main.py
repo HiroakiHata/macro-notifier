@@ -38,12 +38,12 @@ impact_stars = {"Low": 1, "Medium": 2, "High": 3}
 filtered = [e for e in events if start <= datetime.fromisoformat(e['date']) < end]
 filtered.sort(key=lambda x: x['date'])
 
-# --- 要約生成（HuggingFace API） ---
+# --- 要約生成（英語モデルで日本語も可能） ---
 def generate_summary(text):
     if not HF_TOKEN:
         return "要約生成エラー: HF_TOKEN が未設定です"
 
-    url = "https://api-inference.huggingface.co/models/taishi-i/t5-base-japanese-summary"
+    url = "https://api-inference.huggingface.co/models/facebook/bart-large-cnn"
     headers = {"Authorization": f"Bearer {HF_TOKEN}"}
     payload = {"inputs": text}
     try:
@@ -64,8 +64,8 @@ def format_events(events):
         lines.append(f"【{e['country']}】{time_str} （{e['title']}）（{stars}）")
     return "\n".join(lines) if lines else "本日は対象通貨の重要指標がありません。"
 
-# --- GPT要約の文章テンプレ（簡易） ---
-events_text = "。".join([f"{e['country']}の{e['title']}" for e in filtered])
+# --- GPT要約の文章テンプレ（英語モデル対応形式） ---
+events_text = ". ".join([f"{e['title']} ({e['country']})" for e in filtered])
 summary = generate_summary(events_text)
 if not summary.strip():
     summary = "本日は大きな材料が少ないものの、個別指標には注意が必要です。"
@@ -91,4 +91,3 @@ if SLACK_WEBHOOK:
         print("Slack通知失敗:", e)
 else:
     print("Slack Webhookが未設定です")
-
