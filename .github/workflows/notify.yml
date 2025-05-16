@@ -1,31 +1,135 @@
-name: Daily Macro Notifier
+import os, socket, requests
+from datetime import datetime, timedelta, timezone
 
-# 毎平日 08:00 JST に実行（UTC 23:00）
-on:
-  schedule:
-    - cron: '0 23 * * 1-5'
-  workflow_dispatch:
+"""
+Forex-Factory JSON Notifier + Hugging Face 要約(日本語) v7.0
+-------------------------------------------------------
 
-jobs:
-  notify:
-    runs-on: ubuntu-latest
+• 通貨コード: USD/EUR/GBP/JPY/CNY/AUD/NZD を判定
+• impact: Low=1, Medium=2, High=3 → ★1以上を抽出
+• 表示時間帯: 当日 06:01 ～ 翌日 06:00 JST
+• 平日 08:00 JST に自動実行 (cron: '0 23 \* \* 1-5')
+• Hugging Face BART で要約 → 翻訳モデルで日本語化
+• 発表時注意喚起を自動追加
+"""
 
-    # GitHub Secrets から読み込む
-    env:
-      SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
-      HF_TOKEN:      ${{ secrets.HF_TOKEN }}
+# ---- 環境変数 ----
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
+SLACK\_WEBHOOK = os.getenv("SLACK\_WEBHOOK")
+HF\_TOKEN      = os.getenv("HF\_TOKEN")
+if not SLACK\_WEBHOOK:
+raise RuntimeError("⚠️ SLACK\_WEBHOOK が設定されていません。")
+if not HF\_TOKEN:
+raise RuntimeError("⚠️ HF\_TOKEN が設定されていません。")
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.x'
+# ---- JSON取得 ----
 
-      - name: Install dependencies
-        run: pip install -r requirements.txt
+JSON\_URLS = \[
+"[https://cdn-nfs.faireconomy.media/ff\_calendar\_thisweek.json](https://cdn-nfs.faireconomy.media/ff_calendar_thisweek.json)",
+"[https://nfs.faireconomy.media/ff\_calendar\_thisweek.json](https://nfs.faireconomy.media/ff_calendar_thisweek.json)",
+]
+UA = {"User-Agent": "macro-notifier/1.9"}
+resp = None
+for url in JSON\_URLS:
+try:
+host = url.split("//")\[1].split("/")\[0]
+socket.getaddrinfo(host, 443)
+r = requests.get(url, headers=UA, timeout=30)
+if r.status\_code == 200:
+resp = r
+break
+except:
+continue
+if resp is None:
+requests.post(SLACK\_WEBHOOK, json={"text":"⚠️ 経済カレンダー取得失敗"})
+raise SystemExit
 
-      - name: Run notifier
-        run: python main.py
+# ---- JSONパース ----
+
+try:
+events = resp.json()
+except Exception as e:
+requests.post(SLACK\_WEBHOOK, json={"text"\:f"⚠️ JSONパースエラー: {e}"})
+raise
+
+# ---- フィルタ条件 ----
+
+TARGET\_CCY  = {"USD","EUR","GBP","JPY","CNY","AUD","NZD"}
+IMPACT\_MAP  = {"Low":1,"Medium":2,"High":3}
+MIN\_IMPACT  = 1
+jst = timezone(timedelta(hours=9))
+now = datetime.now(jst)
+today = now\.date()
+start\_dt = datetime.combine(today, datetime.min.time(), jst) + timedelta(hours=6, minutes=1)
+end\_dt   = start\_dt + timedelta(days=1) - timedelta(minutes=1)
+
+# ---- イベント抽出 ----
+
+rows = \[]
+event\_lines = \[]
+for ev in events:
+dt\_raw = ev.get("date")
+if not dt\_raw:
+continue
+try:
+dt = datetime.fromisoformat(dt\_raw).astimezone(jst)
+except:
+continue
+if not (start\_dt <= dt <= end\_dt):
+continue
+ccy = (ev.get("currency") or ev.get("country") or "").upper()
+if ccy not in TARGET\_CCY:
+continue
+imp\_val = IMPACT\_MAP.get(str(ev.get("impact","Low")).title(), 0)
+if imp\_val < MIN\_IMPACT:
+continue
+time\_str = dt.strftime("%H:%M")
+title    = ev.get("title") or ev.get("event") or "不明"
+stars    = "★" \* imp\_val
+line = f"【{ccy}】{time\_str} （{title}）（{stars}）"
+rows.append(line)
+event\_lines.append(line)
+
+# ---- 要約生成 (英語) ----
+
+hf\_payload = {"inputs": "\n".join(event\_lines), "parameters": {"max\_length":200, "min\_length":50}}
+hf\_headers = {"Authorization": f"Bearer {HF\_TOKEN}"}
+try:
+hf\_resp = requests.post(
+"[https://api-inference.huggingface.co/models/facebook/bart-large-cnn](https://api-inference.huggingface.co/models/facebook/bart-large-cnn)",
+headers=hf\_headers,
+json=hf\_payload,
+timeout=30
+)
+hf\_resp.raise\_for\_status()
+summary\_en = hf\_resp.json()\[0]\["summary\_text"]
+except Exception as e:
+summary\_en = f"⚠️ 要約生成エラー: {e}"
+
+# ---- 翻訳 (英語→日本語) ----
+
+try:
+tr\_resp = requests.post(
+"[https://api-inference.huggingface.co/models/Helsinki-NLP/opus-mt-en-ja](https://api-inference.huggingface.co/models/Helsinki-NLP/opus-mt-en-ja)",
+headers=hf\_headers,
+json={"inputs": summary\_en},
+timeout=30
+)
+tr\_resp.raise\_for\_status()
+summary\_ja = tr\_resp.json()\[0]\["translation\_text"]
+except Exception as e:
+summary\_ja = f"⚠️ 翻訳エラー: {e}"
+
+# ---- 発表時注意喚起 ----
+
+times = sorted({ln.split('】')\[1].split(' ')\[0] for ln in event\_lines})
+caution\_lines = \[f"【{t}】の発表時は相場が大きく変動する可能性がありますのでご注意ください。" for t in times]
+caution = "\n".join(caution\_lines)
+
+# ---- Slack通知 ----
+
+header = "\:chart\_with\_upwards\_trend: *本日の重要経済指標（7通貨・★1以上）*\n`JST 06:01〜翌06:00`\n\n"
+body   = "\n".join(rows) if rows else "本日は対象通貨の重要指標がありません。"
+text   = header + body + "\n\n\:page\_facing\_up: *要約レポート*\n" + summary\_ja + "\n\n\:warning: *注意事項*\n" + caution
+requests.post(SLACK\_WEBHOOK, json={"text": text})
+
